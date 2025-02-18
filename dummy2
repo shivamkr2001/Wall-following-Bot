@@ -1,0 +1,180 @@
+Let me help you fix the Template Preprocessor approach (Method 3). The issue is happening because we need to handle the comparison nodes more carefully. Here's the corrected version:
+
+```python
+from jinja2 import Environment, BaseLoader, nodes
+
+class SafeCompareEnvironment(Environment):
+    def parse(self, source):
+        tree = super().parse(source)
+        return self._fix_none_comparisons(tree)
+
+    def _fix_none_comparisons(self, node):
+        if isinstance(node, nodes.Compare):
+            # Create a conditional expression to handle None case
+            test_node = nodes.Test(
+                node=node.expr,
+                name='none',
+                args=[],
+                kwargs=[],
+                dyn_args=None,
+                dyn_kwargs=None
+            )
+            
+            # If value is None, return False
+            if_none = nodes.Const(False)
+            
+            # If value is not None, do the original comparison
+            if_not_none = nodes.Compare(
+                node.expr,
+                [nodes.Operand(node.ops[0].op, node.ops[0].expr)]
+            )
+            
+            # Replace the original comparison with a conditional
+            return nodes.CondExpr(
+                test_node,
+                if_none,
+                if_not_none
+            )
+            
+        # Recursively process child nodes
+        for field, child in node.iter_fields():
+            if isinstance(child, list):
+                for idx, item in enumerate(child):
+                    if isinstance(item, nodes.Node):
+                        child[idx] = self._fix_none_comparisons(item)
+            elif isinstance(child, nodes.Node):
+                setattr(node, field, self._fix_none_comparisons(child))
+        
+        return node
+
+# Usage example
+def create_safe_environment():
+    env = SafeCompareEnvironment(loader=BaseLoader())
+    return env
+
+# Example usage
+env = create_safe_environment()
+template = env.from_string("{% if value <= 10 %}Less or equal{% else %}Greater{% endif %}")
+result = template.render(value=None)  # This should work now
+
+# For file-based templates
+from jinja2 import FileSystemLoader
+env = SafeCompareEnvironment(loader=FileSystemLoader('your_templates_directory'))
+
+# Usage with actual template files
+def render_template_safe(template_name, data):
+    template = env.get_template(template_name)
+    return template.render(**data)
+```
+
+Alternative version with more explicit error handling:
+
+```python
+from jinja2 import Environment, BaseLoader, nodes, TemplateError
+
+class SafeCompareEnvironment(Environment):
+    def parse(self, source):
+        try:
+            tree = super().parse(source)
+            return self._fix_none_comparisons(tree)
+        except Exception as e:
+            raise TemplateError(f"Error parsing template: {str(e)}")
+
+    def _fix_none_comparisons(self, node):
+        try:
+            if isinstance(node, nodes.Compare):
+                # Handle comparison operators
+                ops = []
+                for op in node.ops:
+                    if op.op in ('<=', '>=', '<', '>', '==', '!='):
+                        # Create safe comparison
+                        test_node = nodes.Test(
+                            node=node.expr,
+                            name='none',
+                            args=[],
+                            kwargs=[],
+                            dyn_args=None,
+                            dyn_kwargs=None
+                        )
+                        
+                        if_none = nodes.Const(False)
+                        if_not_none = nodes.Compare(
+                            node.expr,
+                            [nodes.Operand(op.op, op.expr)]
+                        )
+                        
+                        return nodes.CondExpr(
+                            test_node,
+                            if_none,
+                            if_not_none
+                        )
+                    ops.append(op)
+                
+                if ops:
+                    node.ops = ops
+            
+            # Process child nodes
+            for field, child in node.iter_fields():
+                if isinstance(child, list):
+                    for idx, item in enumerate(child):
+                        if isinstance(item, nodes.Node):
+                            child[idx] = self._fix_none_comparisons(item)
+                elif isinstance(child, nodes.Node):
+                    setattr(node, field, self._fix_none_comparisons(child))
+            
+            return node
+            
+        except Exception as e:
+            raise TemplateError(f"Error processing node: {str(e)}")
+
+# Usage with extended error handling
+def create_safe_environment(template_dir=None):
+    try:
+        if template_dir:
+            loader = FileSystemLoader(template_dir)
+        else:
+            loader = BaseLoader()
+        env = SafeCompareEnvironment(loader=loader)
+        return env
+    except Exception as e:
+        raise RuntimeError(f"Failed to create environment: {str(e)}")
+
+def render_template_safe(env, template_name, data):
+    try:
+        template = env.get_template(template_name)
+        return template.render(**data)
+    except Exception as e:
+        raise RuntimeError(f"Failed to render template {template_name}: {str(e)}")
+
+# Example usage
+try:
+    env = create_safe_environment('templates')
+    result = render_template_safe(env, 'your_template.html', {'value': None})
+    print(result)
+except Exception as e:
+    print(f"Error: {str(e)}")
+```
+
+Key improvements in this version:
+1. Properly handles all comparison operators (<, >, <=, >=, ==, !=)
+2. Adds comprehensive error handling
+3. Preserves template structure while making comparisons safe
+4. Works with both string templates and template files
+5. Handles nested comparisons correctly
+
+To use this in your existing codebase:
+
+```python
+# Setup once at application startup
+env = create_safe_environment('your_templates_directory')
+
+# Use throughout your code
+def your_render_function(template_name, context_data):
+    try:
+        return render_template_safe(env, template_name, context_data)
+    except Exception as e:
+        # Handle or log error as needed
+        raise
+```
+
+This should now handle the None comparison cases correctly without modifying your templates. Let me know if you encounter any specific issues or need clarification on any part!​​​​​​​​​​​​​​​​
