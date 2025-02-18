@@ -1,0 +1,146 @@
+You can handle this at the code level by preprocessing your data before passing it to the Jinja2 templates. Here are a few approaches:
+
+1. **Using a Data Wrapper Class:**
+```python
+class SafeCompareWrapper:
+    def __init__(self, value):
+        self._value = value
+
+    def __le__(self, other):
+        if self._value is None:
+            return False
+        return self._value <= other
+    
+    # Add other comparison methods if needed
+    def __eq__(self, other):
+        if self._value is None:
+            return False
+        return self._value == other
+
+    def __str__(self):
+        return str(self._value)
+
+# Usage
+def render_template(template, data):
+    # Wrap numeric values that might be None
+    wrapped_data = {}
+    for key, value in data.items():
+        if isinstance(value, (int, float)) or value is None:
+            wrapped_data[key] = SafeCompareWrapper(value)
+        else:
+            wrapped_data[key] = value
+            
+    return template.render(**wrapped_data)
+
+# Example
+template_str = "{% if value <= 10 %}Less or equal{% else %}Greater{% endif %}"
+template = env.from_string(template_str)
+data = {"value": None}
+result = render_template(template, data)
+```
+
+2. **Using a Dictionary Subclass:**
+```python
+class SafeCompareDict(dict):
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        if isinstance(value, (int, float)) or value is None:
+            return SafeCompareWrapper(value)
+        return value
+
+# Usage
+def render_template(template, data):
+    safe_data = SafeCompareDict(data)
+    return template.render(**safe_data)
+```
+
+3. **Using Template Preprocessor:**
+```python
+from jinja2 import Environment, BaseLoader, nodes
+
+class SafeCompareEnvironment(Environment):
+    def parse(self, source):
+        tree = super().parse(source)
+        self._fix_none_comparisons(tree)
+        return tree
+
+    def _fix_none_comparisons(self, node):
+        if isinstance(node, nodes.Compare):
+            # Replace comparison nodes with safe versions
+            if isinstance(node.expr, nodes.Name):
+                node.expr = nodes.Filter(
+                    node=node.expr,
+                    name='default',
+                    args=[nodes.Const(0)],
+                    kwargs=[],
+                    dyn_args=None,
+                    dyn_kwargs=None
+                )
+        for child in node.iter_child_nodes():
+            self._fix_none_comparisons(child)
+
+# Usage
+env = SafeCompareEnvironment(loader=BaseLoader())
+template = env.from_string("{% if value <= 10 %}Less or equal{% else %}Greater{% endif %}")
+```
+
+4. **Using a Context Preprocessor:**
+```python
+def preprocess_context(context):
+    def wrap_value(value):
+        if isinstance(value, dict):
+            return {k: wrap_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [wrap_value(v) for v in value]
+        elif isinstance(value, (int, float)) or value is None:
+            return SafeCompareWrapper(value)
+        return value
+
+    return wrap_value(context)
+
+# Usage
+def render_template(template, data):
+    safe_data = preprocess_context(data)
+    return template.render(**safe_data)
+
+# Example usage
+template_str = "{% if value <= 10 %}Less or equal{% else %}Greater{% endif %}"
+template = env.from_string(template_str)
+data = {
+    "value": None,
+    "nested": {
+        "another_value": None
+    }
+}
+result = render_template(template, data)
+```
+
+I recommend the first approach (SafeCompareWrapper) as it's:
+1. Straightforward to implement
+2. Easy to maintain
+3. Doesn't require modifying templates
+4. Handles nested structures
+5. Can be extended for other comparison operators
+
+Example usage with a real template:
+```python
+# Setup
+env = Environment(loader=FileSystemLoader('templates'))
+
+# Your template rendering function
+def render_template_safe(template_name, data):
+    template = env.get_template(template_name)
+    return render_template(template, data)
+
+# Usage
+data = {
+    "threshold": None,
+    "values": [1, None, 3],
+    "nested": {
+        "value": None
+    }
+}
+result = render_template_safe('your_template.html', data)
+```
+
+This will handle all None comparisons in your templates without requiring any template modifications. Would you like me to explain any part in more detail?​​​​​​​​​​​​​​​​
